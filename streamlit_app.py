@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from io import StringIO
+from st_copy import copy_button
 
 st.set_page_config(page_title="FH -> Markdown", layout="wide")
 st.title("FH table→ Markdown Formatted Summary")
@@ -318,6 +319,7 @@ st.subheader("Generated Markdown Summary")
 remove_first_name = st.toggle("Remove First Name", value=False)
 remove_conf_info = st.toggle("Remove Confirmation Information", value=False)
 
+# Select the correct markdown output
 if remove_first_name and remove_conf_info:
     selected_markdown = no_confs_and_no_name_markdown_output
 elif remove_first_name:
@@ -327,19 +329,37 @@ elif remove_conf_info:
 else:
     selected_markdown = markdown_output
 
-if selected_markdown.strip():
-    st.write(selected_markdown)
-else:
-    st.write("_No rows to summarise_")
+# -----------------------
+# Create container style
+# -----------------------
 
-if markdown_output:
-    st.download_button(
-        "Download Markdown (.md)",
-        data=markdown_output,
-        file_name="family_history_summary.md",
-        mime="text/markdown"
-    )
-    st.markdown("You can copy the markdown above or download it as a `.md` file.")
+css = """
+<style>
+    .st-key-styled_container{
+    background-color:lightgray;
+    padding:2rem;
+    }
+
+ .st-key-styled_container div[data-testid="stText"] div{
+    color:black;
+
+}
+</style>"""
+st.html(css)
+
+# -----------------------
+# Create output
+# -----------------------
+
+with st.container(key="styled_container"):
+    st.markdown(selected_markdown)
+
+copy_button(
+    (selected_markdown),
+    tooltip="Copy this text",
+    copied_label="Copied!",
+    icon="st",
+)
 
 # Small preview of the processed columns for debugging
 with st.expander("Processed columns preview (debug)"):
