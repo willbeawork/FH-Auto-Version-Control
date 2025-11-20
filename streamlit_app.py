@@ -270,9 +270,9 @@ def build_line(row) -> str:
     phrase = make_phrase(conf)
     # Format: Relationship, Firstname, phrase diagnosis - status
     if first and first.lower() not in ['nan','none','']:
-        return f"{rel}, {first}, {phrase} {diag} - {conf}"
+        return f"{rel}, {first}, {phrase} {diag} - *{conf}*"
     else:
-        return f"{rel}, {phrase} {diag} - {conf}"
+        return f"{rel}, {phrase} {diag} - *{conf}*"
 
 def no_name_build_line(row) -> str:
     rel = str(row.get('Relationship_clean', '')).strip()
