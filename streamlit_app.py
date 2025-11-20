@@ -199,9 +199,17 @@ def text_change(text, word_dict):
 def second_change(incomplete_text, second_dict):
     if pd.isna(incomplete_text):
         return ""
+    text=str(incomplete_text)
     for new, old in second_dict.items():
-        incomplete_text = incomplete_text.replace(old, new)
-    return incomplete_text
+        #DO NOT replace 'father' or 'mother' when inside longer words
+        if old in ["father", "mother"]:
+            pattern=rf'\b{re.escape(old)}\b'
+        else:
+            #normal replacement
+            pattern = rf'\b{re.escape(old)}\b'
+        text= re.sub(pattern, new, text, flags=re.IGNORECASE)
+    return text
+
 
 def convert_at_symbols(text):
     if pd.isna(text):
