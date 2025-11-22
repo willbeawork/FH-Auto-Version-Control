@@ -4,13 +4,16 @@ import re
 from io import StringIO
 from st_copy import copy_button
 
-st.set_page_config(page_title="FH -> Markdown", layout="wide")
-st.title("FH table→ Markdown Formatted Summary")
-st.markdown("Paste tab-separated family-history data, edit the table, and generate a markdown summary.")
-
 # --- Initialise session_state for selection ---
 if "selected_option" not in st.session_state:
     st.session_state.selected_option = "Paste Raw Data"   # Default pre-selected
+
+def select_option(option):
+    st.session_state.selected_option = option
+
+st.set_page_config(page_title="FH -> Markdown", layout="wide")
+st.title("FH table→ Markdown Formatted Summary")
+st.write(f"🔍 **Current Input Mode:** {st.session_state.selected_option}")
 
 #Make an empty df for manual input mode
 if "manual_df" not in st.session_state:
@@ -65,18 +68,16 @@ def select_option(option):
 left, middle, right = st.columns(3)
 
 with left:
-    if st.button("Paste Raw Data",width="stretch"):
+    if st.button("*Paste Raw Data*",width="stretch"):
         select_option("Paste Raw Data")
 
 with middle:
-    if st.button("CSV/XLSX File",width="stretch"):
+    if st.button("*CSV/XLSX File*",width="stretch"):
         select_option("CSV/XLSX File")
 
 with right:
-    if st.button("Manual Input",width="stretch"):
+    if st.button("*Manual Input*",width="stretch"):
         select_option("Manual Input")
-
-st.write(f"🔍 **Current Input Mode:** {st.session_state.selected_option}")
 
 # -----------------------
 # Define session states and respective input UIs
@@ -84,7 +85,9 @@ st.write(f"🔍 **Current Input Mode:** {st.session_state.selected_option}")
 
 
 # --- PASTE RAW DATA ---
+
 if st.session_state.selected_option == "Paste Raw Data":
+    st.subheader("Paste raw table data here")
     with st.expander("How to use"):
         st.write(
             """
@@ -94,13 +97,14 @@ if st.session_state.selected_option == "Paste Raw Data":
             """
         )
     with st.form("raw_data_form"):
+        st.write("Include header row")
 
         raw_data = st.text_area(
-            "Paste raw table data here (tab-separated). Include header row.",
+            label="",
             value="Relationship\tFirst Name\tDiagnosis (laterality, hormones, subtype)@age\tConfirmed/Not confirmed/Abroad",
             height=200,
             help="You can copy table rows from Excel/Google Sheets then paste here."
-        )
+)
 
         # Submit button (also triggered by CTRL+Enter)
         submitted = st.form_submit_button("Submit")
@@ -145,6 +149,29 @@ if st.session_state.selected_option == "Manual Input":
         num_rows="dynamic",   # allows adding new rows
         hide_index=True       # optional: hides the index column
     )
+    # --- Example table in an expander ---
+    with st.expander("***Example Table (Read-only)***"):
+        example_data = pd.DataFrame([
+        {
+            "Relationship": "Father",
+            "First Name": "Dennis",
+            "Diagnosis (laterality, hormones, subtype)@age": "Prostate@56 (Adenocarcinoma, Confined to prostate)",
+            "Confirmed/Not confirmed/Abroad": "Confirmed"
+        },
+        {
+            "Relationship": "Paternal Aunt",
+            "First Name": "Alice",
+            "Diagnosis (laterality, hormones, subtype)@age": "Breast@60 (Grade 1, ER+)",
+            "Confirmed/Not confirmed/Abroad": "Confirmed, In Australia"
+        }
+        ])
+
+        # Style example table: italics + grey background
+        def style_example(row):
+            return ['font-style: italic; background-color: #f0f0f0'] * len(row)
+
+
+        st.dataframe(example_data.style.apply(style_example, axis=1), use_container_width=True)
 
 # Normalize columns if slightly different names (common variations)
 # FIX: Ensure df always exists depending on mode
@@ -265,25 +292,67 @@ def convert_at_symbols(text):
     text = re.sub(r'@(\d{1,3})(?!\d|s)', r' aged \1', text)
     return text
 
-def clean_diagnosis(text):
-    if pd.isna(text):
-        return ""
-    text = str(text).lower().strip()
+
+def clean_single_dx(text):
+    """Cleans one *single* diagnosis."""
+    text = text.lower().strip()
+    text = convert_at_symbols(text)
     # change crc to colorectal
     text = re.sub(r'\bcrc\b', 'colorectal', text)
     # exceptions where we shouldn't append 'cancer'
-    exceptions = ['leukaemia', 'lymphoma', 'melanoma', 'multiple myeloma','polyps']
+    exceptions = [
+        'leukaemia', 'lymphoma', 'melanoma', 'multiple myeloma',
+        'polyps', 'cancer of', 'dcis', 'lcis', 'brain tumour']
     if any(exc in text for exc in exceptions):
-        return text
-    # split before age info (which starts with patterns we've used)
+        return re.sub(r'\bcancer(?:\s+cancer)+', 'cancer', text).strip()
+    # split of age info
     parts = re.split(r'(@\?|@\d{1,3}s?| aged \d{1,3}| in their \d{2}s| at an unknown age)', text)
     if len(parts) > 1:
-        return parts[0].strip() + ' cancer ' + ''.join(parts[1:]).strip()
+        dx = parts[0].strip()
+        if 'cancer' not in dx:
+            dx += ' cancer'
+        result = dx + ' ' + ''.join(parts[1:]).strip()
     else:
-        # If no age info, just add ' cancer' to the end (unless already contains 'cancer')
         if 'cancer' in text:
-            return text
-        return text + ' cancer'
+            result = text
+        else:
+            result = text + ' cancer'
+    # remove duplicate cancer
+    result = re.sub(r'\bcancer(?:\s+cancer)+', 'cancer', result)
+    return result.strip()
+
+
+def clean_diagnosis(text):
+    """Handles multiple diagnoses by splitting after the first space following each '@...'."""
+    if pd.isna(text):
+        return ""
+    text = str(text).strip()
+    # If no @ present → simple path
+    if '@' not in text:
+        return clean_single_dx(text)
+    parts = []
+    start = 0
+    # Pattern to match @?, @55, @70s, etc.
+    age_pattern = re.compile(r'@( \?|\d{1,3}s?|\?)')
+    # Find each @ and follow until the next space
+    for match in re.finditer(r'@', text):
+        # Find the end of the age info: @55, @?, @70s…
+        age_match = re.match(r'@\d{1,3}s?|@\?', text[match.start():])
+        if age_match:
+            age_end = match.start() + len(age_match.group())
+        else:
+            age_end = match.start() + 1  # fallback
+        # Find first space AFTER age block
+        next_space = text.find(' ', age_end)
+        if next_space != -1:
+            # Add text from previous start to this split point
+            parts.append(text[start:next_space].strip())
+            start = next_space + 1
+    # Add final piece
+    parts.append(text[start:].strip())
+    # Clean each diagnosis
+    cleaned = [clean_single_dx(p) for p in parts if p]
+    return " and ".join(cleaned)
 
 def parse_confirmation(text: str) -> str:
     """
@@ -324,8 +393,8 @@ proc_df['Relationship_clean'] = proc_df['Relationship_clean'].apply(lambda x: se
 
 # Diagnosis transformation
 proc_df[expected_diag_col] = proc_df[expected_diag_col].astype(str)
-proc_df[expected_diag_col] = proc_df[expected_diag_col].apply(convert_at_symbols)
 proc_df[expected_diag_col] = proc_df[expected_diag_col].apply(clean_diagnosis)
+proc_df[expected_diag_col] = proc_df[expected_diag_col].apply(convert_at_symbols)
 # remove bracketed text
 proc_df[expected_diag_col] = proc_df[expected_diag_col].str.replace(r'\(.*?\)', '', regex=True).str.strip()
 
