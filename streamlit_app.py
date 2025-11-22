@@ -12,6 +12,53 @@ st.markdown("Paste tab-separated family-history data, edit the table, and genera
 if "selected_option" not in st.session_state:
     st.session_state.selected_option = "Paste Raw Data"   # Default pre-selected
 
+#Make an empty df for manual input mode
+if "manual_df" not in st.session_state:
+    # Initialize empty editable DataFrame for Manual Input
+    st.session_state.manual_df = pd.DataFrame(columns=[
+        "Relationship",
+        "First Name",
+        "Diagnosis (laterality, hormones, subtype)@age",
+        "Confirmed/Not confirmed/Abroad"
+    ])
+
+#Define a function to 'Parse' (Reformat pasted data)
+def parse_raw_data(raw_data: str) -> pd.DataFrame:
+    if not raw_data or not raw_data.strip():
+        return pd.DataFrame()
+
+    lines = [line.strip() for line in raw_data.strip().split('\n') if line.strip()]
+    if not lines:
+        return pd.DataFrame()
+
+    header = lines[0].split("\t")
+    data_lines = lines[1:]
+
+    records = []
+    temp = []
+
+    # combine multiline rows
+    for line in data_lines:
+        if line.count("\t") >= 2:
+            if temp:
+                records.append(temp)
+            temp = [line]
+        else:
+            temp.append(line)
+    if temp:
+        records.append(temp)
+
+    processed = []
+    for record in records:
+        full_line = " ".join(record)
+        parts = full_line.split("\t")
+
+        while len(parts) < len(header):
+            parts.append("")
+        processed.append(dict(zip(header, parts)))
+
+    return pd.DataFrame(processed)
+
 def select_option(option):
     st.session_state.selected_option = option
 
@@ -32,101 +79,87 @@ with right:
 st.write(f"🔍 **Current Input Mode:** {st.session_state.selected_option}")
 
 # -----------------------
-# Helper: parse raw pasted data (multiline merging logic you provided)
+# Define session states and respective input UIs
 # -----------------------
-def parse_raw_data(raw_data: str) -> pd.DataFrame:
-    if not raw_data or not raw_data.strip():
-        return pd.DataFrame()
 
-    # Clean and split lines
-    lines = [line.strip() for line in raw_data.strip().split('\n') if line.strip()]
-    if not lines:
-        return pd.DataFrame()
 
-    header = lines[0].split('\t')
-    data_lines = lines[1:]
+# --- PASTE RAW DATA ---
+if st.session_state.selected_option == "Paste Raw Data":
+    with st.expander("How to use"):
+        st.write(
+            """
+            - Paste tab-separated text (including header row) into the box below, or upload a CSV/TSV/Excel file.
+            - Edit the table directly using the editor.
+            - Click **Generate Markdown** to create the summary.
+            """
+        )
+    with st.form("raw_data_form"):
 
-    # Combine multiline records
-    records = []
-    temp = []
-    for line in data_lines:
-        if line.count('\t') >= 2:  # new full row
-            if temp:
-                records.append(temp)
-            temp = [line]
-        else:
-            temp.append(line)
-    if temp:
-        records.append(temp)
+        raw_data = st.text_area(
+            "Paste raw table data here (tab-separated). Include header row.",
+            value="Relationship\tFirst Name\tDiagnosis (laterality, hormones, subtype)@age\tConfirmed/Not confirmed/Abroad",
+            height=200,
+            help="You can copy table rows from Excel/Google Sheets then paste here."
+        )
 
-    processed = []
-    for record in records:
-        full_line = ' '.join(record).replace('\t', '\t', 1)
-        parts = full_line.split('\t')
+        # Submit button (also triggered by CTRL+Enter)
+        submitted = st.form_submit_button("Submit")
 
-        # Ensure same length as header
-        while len(parts) < len(header):
-            parts.append('')
-        processed.append(dict(zip(header, parts)))
+    # Handle submission
+    if submitted:
+        st.session_state.raw_submitted = raw_data
+        st.session_state.raw_df = parse_raw_data(raw_data)
 
-    return pd.DataFrame(processed)
 
-# -----------------------
-# UI: input area + optional file upload
-# -----------------------
-with st.expander("How to use"):
-    st.write(
-        """
-        - Paste tab-separated text (including header row) into the box below, or upload a CSV/TSV/Excel file.
-        - Edit the table directly using the editor.
-        - Click **Generate Markdown** to create the summary.
-        """
-    )
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    raw_data = st.text_area(
-        "Paste raw table data here (tab-separated). Include header row. Example header:",
-        value="Relationship\tFirst Name\tDiagnosis (laterality, hormones, subtype)@age\tConfirmed/Not confirmed/Abroad",
-        height=200,
-        help="You can copy table rows from Excel/Google Sheets then paste here."
-    )
-
-with col2:
+# --- FILE UPLOAD ---
+if st.session_state.selected_option == "CSV/XLSX File":  
+    st.write("- Header names must be: " )
+    st.write("Relationship | First Name | Diagnosis (additional info)@age | Confirmed/Not confirmed/Abroad")
     uploaded = st.file_uploader("Or upload CSV / TSV / XLSX", type=["csv", "tsv", "xlsx", "xls"])
     st.write("Preview / examples")
-    st.write("- Header names must include the diagnosis column name shown above.")
 
-# If uploaded file present, read it and override raw_data
-if uploaded:
-    try:
-        if uploaded.name.endswith((".xls", ".xlsx")):
-            df_uploaded = pd.read_excel(uploaded)
-        else:
-            try:
-                df_uploaded = pd.read_csv(uploaded)
-            except Exception:
-                uploaded.seek(0)
-                df_uploaded = pd.read_csv(uploaded, sep='\t')
-        df = df_uploaded.copy()
-    except Exception as e:
-        st.error(f"Failed to read uploaded file: {e}")
-        df = pd.DataFrame()
-else:
-    # Parse pasted raw_data
-    if raw_data and raw_data.strip():
-        df = parse_raw_data(raw_data)
-    else:
-        # Empty default
-        df = pd.DataFrame(columns=[
-            "Relationship",
-            "First Name",
-            "Diagnosis (laterality, hormones, subtype)@age",
-            "Confirmed/Not confirmed/Abroad"
-        ])
+    # If uploaded file present, read it and override raw_data
+    if uploaded:
+        try:
+            if uploaded.name.endswith((".xls", ".xlsx")):
+                df_uploaded = pd.read_excel(uploaded)
+            else:
+                try:
+                    df_uploaded = pd.read_csv(uploaded)
+                except Exception:
+                    uploaded.seek(0)
+                    df_uploaded = pd.read_csv(uploaded, sep='\t')
+            df = df_uploaded.copy()
+        except Exception as e:
+            st.error(f"Failed to read uploaded file: {e}")
+            df = pd.DataFrame()
+
+# --- MANUAL INPUT ---
+if st.session_state.selected_option == "Manual Input":
+    st.subheader("Input & Edit Table")
+    st.markdown("⚠️WARNING: Any information in brackets will be removed from the diagnosis section")
+    # Show editable DataFrame
+    edited_df = st.data_editor(
+        st.session_state.manual_df,
+        use_container_width=True,
+        num_rows="dynamic",   # allows adding new rows
+        hide_index=True       # optional: hides the index column
+    )
 
 # Normalize columns if slightly different names (common variations)
+# FIX: Ensure df always exists depending on mode
+if st.session_state.selected_option == "Paste Raw Data":
+    df = parse_raw_data(raw_data)
+
+elif st.session_state.selected_option == "CSV/XLSX File":
+    if uploaded:
+        df = df_uploaded.copy()
+    else:
+        df = pd.DataFrame()
+
+elif st.session_state.selected_option == "Manual Input":
+    df = edited_df.copy()
+
 expected_diag_col = "Diagnosis (laterality, hormones, subtype)@age"
 alt_diag_cols = [c for c in df.columns if "diagnos" in c.lower() and "age" in c.lower()]
 
@@ -134,61 +167,70 @@ if expected_diag_col not in df.columns and alt_diag_cols:
     df = df.rename(columns={alt_diag_cols[0]: expected_diag_col})
 
 # Ensure columns exist
-for col in ["Relationship", "First Name", expected_diag_col, "Confirmed/Not confirmed/Abroad"]:
+required_cols = ["Relationship", "First Name", expected_diag_col,
+                 "Confirmed/Not confirmed/Abroad"]
+
+for col in required_cols:
     if col not in df.columns:
         df[col] = ""
 
-# Show editable table
-st.subheader("Review / Edit Table")
-st.markdown("WARNING: Any information in brackets will be removed from the diagnosis section")
-edited_df = st.data_editor(df, use_container_width=True)
+
+# Show editable table for raw data and file upload inputs but not manual input
+if st.session_state.selected_option in ["Paste Raw Data", "CSV/XLSX File"]:
+    st.subheader("Review / Edit Table")
+    st.markdown("WARNING: Any information in brackets will be removed from the diagnosis section")
+    edited_df = st.data_editor(df, use_container_width=True)
+
 # -----------------------
 # Text transformation logic (your provided functions, adjusted)
 # -----------------------
 word_dict = {
-    "maternal" : ["Mat", "mat"],
-    "maternal " : ["M.", "m."],
-    "paternal" : ["Pat", "pat"],
-    "paternal " : ["P.", "p."],
-    "sibling" : ["Sib", "sib"],
-    "father" : ["Dad", "dad"],
-    "mother" : ["Mum", "mum"],
-    "sister" : ["Sis", "sis"],
-    "brother" : ["Bro", "bro"],
-    "aunt" : ["Aunt", "aunt"],
-    "uncle" : ["Uncle", "unc", "Unc"],
-    "niece" : ["Niece", "niece"],
-    "nephew" : ["Nephew", "nephew"],
-    "cousin" : ["Cous", "Cous,", "cous", "cous,","Cousin"],
-    "maternal grandmother": ["MGM", "MGM,"],
-    "paternal grandmother" : ["PGM", "PGM,"],
-    "paternal grandfather" : ["PGF" , "PGF,"],
-    "maternal grandfather" : ["MGF" , "MGF,"],
-    "grandfather" : ["GF"],
-    "grandmother" : ["GM"],
-    "maternal great grandfather" : ["MGGF"],
-    "paternal great grandfather" : ["PGGF"],
-    "paternal great grandmother" : ["PGGM"],
-    "maternal great grandmother" : ["MGGM"]
+    "maternal": ["mat", "mat"],
+    "maternal " : ["M.", "m.","m. "],
+    "paternal": ["pat", "pat"],
+    "paternal " : ["P.", "p.", "p. "],
+    "sibling": ["sib", "sib"],
+    "father": ["dad", "dad"],
+    "mother": ["mum", "mum"],
+    "sister": ["sis", "sis"],
+    "brother": ["bro", "bro"],
+    "aunt": ["aunt", "aunt"],
+    "uncle": ["uncle", "unc", "unc"],
+    "niece": ["niece", "niece"],
+    "nephew": ["nephew", "nephew"],
+    "cousin": ["cous", "cous,", "cous", "cous,"],
+    "maternal grandmother": ["mgm", "mgm,"],
+    "paternal grandmother": ["pgm", "pgm,"],
+    "paternal grandfather": ["pgf", "pgf,"],
+    "maternal grandfather": ["mgf", "mgf,"],
+    "grandfather": ["gf"],
+    "grandmother": ["gm"],
+    "great grandfather": ["ggf"],
+    "great grandmother": ["ggm"],
+    "maternal great grandfather": ["mggf"],
+    "paternal great grandfather": ["pggf"],
+    "paternal great grandmother": ["pggm"],
+    "maternal great grandmother": ["mggm"]
 }
 
 second_dict = {
-    "Your father" : "Father",
-    "Your mother" : "Mother",
-    "Your brother" : "Brother",
-    "Your sister" : "Sister",
-    "Your paternal" : "paternal",
-    "Your maternal" : "maternal",
-    "You" : "Patient"
+    "Your father": "father",
+    "Your mother": "mother",
+    "Your brother": "brother",
+    "Your sister": "sister",
+    "Your paternal": "paternal",
+    "Your maternal": "maternal",
+    "You": "patient"
 }
 
 def text_change(text, word_dict):
+    text = str(text).lower()
     if pd.isna(text):
         return ""
     for update, originals in word_dict.items():
         for original in originals:
             # skip certain replacements if part of a longer word
-            if original.lower() in ["sis", "mat", "pat", "bro","gm","gf","GM","GF"]:
+            if original.lower() in ["sis", "mat", "pat", "bro","gm","gf"]:
                 # only match if the word is standalone (not part of sister/maternal etc)
                 pattern = rf'(?<!\w){re.escape(original)}(?![a-zA-Z])'
             else:
@@ -199,17 +241,17 @@ def text_change(text, word_dict):
 def second_change(incomplete_text, second_dict):
     if pd.isna(incomplete_text):
         return ""
-    text=str(incomplete_text)
+    text = str(incomplete_text)
     for new, old in second_dict.items():
-        #DO NOT replace 'father' or 'mother' when inside longer words
+        # Do NOT replace 'father' or 'mother' when inside longer words
         if old in ["father", "mother"]:
-            pattern=rf'\b{re.escape(old)}\b'
-        else:
-            #normal replacement
+            # only replace them as standalone words
             pattern = rf'\b{re.escape(old)}\b'
-        text= re.sub(pattern, new, text, flags=re.IGNORECASE)
+        else:
+            # normal replacement
+            pattern = rf'\b{re.escape(old)}\b'
+        text = re.sub(pattern, new, text, flags=re.IGNORECASE)
     return text
-
 
 def convert_at_symbols(text):
     if pd.isna(text):
@@ -243,6 +285,35 @@ def clean_diagnosis(text):
             return text
         return text + ' cancer'
 
+def parse_confirmation(text: str) -> str:
+    """
+    Standardize user-entered confirmation status.
+    
+    Returns one of:
+        - 'Confirmed'
+        - 'Not confirmed'
+        - 'Unconfirmed'
+    or flags with 🚩Review🚩 if invalid.
+    
+    Handles optional trailing spaces or full stops.
+    """
+    if pd.isna(text) or str(text).strip() == "":
+        return ""
+    
+    # Remove leading/trailing whitespace and trailing period
+    cleaned_text = str(text).strip().rstrip(".").lower()
+    
+    # Standardize the three allowed options
+    if cleaned_text == "confirmed":
+        return "Confirmed"
+    elif cleaned_text == "not confirmed":
+        return "Not confirmed"
+    elif cleaned_text == "unconfirmed":
+        return "Unconfirmed"
+    else:
+        # Flag invalid entries
+        return f"{text} 🚩Review🚩"
+    
 # Apply conversions to the edited dataframe copy
 proc_df = edited_df.copy()
 proc_df = proc_df.fillna("")
@@ -276,7 +347,7 @@ def build_line(row) -> str:
     rel = str(row.get('Relationship_clean','')).strip()
     first = str(row.get('First Name','')).strip()
     diag = str(row.get(expected_diag_col,'')).strip()
-    conf = str(row.get('Confirmed/Not confirmed/Abroad','')).strip()
+    conf = parse_confirmation(row.get('Confirmed/Not confirmed/Abroad',''))
     phrase = make_phrase(conf)
     # Format: Relationship, Firstname, phrase diagnosis - status
     if first and first.lower() not in ['nan','none','']:
