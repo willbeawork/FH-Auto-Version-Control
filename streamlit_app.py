@@ -12,7 +12,8 @@ def select_option(option):
     st.session_state.selected_option = option
 
 st.set_page_config(page_title="FH -> Markdown", layout="wide")
-st.title("FH table→ Markdown Formatted Summary")
+st.title("FH table -> Formatted Summary")
+st.write(f"Developed for use by cancer genetics clinicans")
 st.write(f"🔍 **Current Input Mode:** {st.session_state.selected_option}")
 
 #Make an empty df for manual input mode
@@ -237,7 +238,8 @@ word_dict = {
     "maternal great grandfather": ["mggf"],
     "paternal great grandfather": ["pggf"],
     "paternal great grandmother": ["pggm"],
-    "maternal great grandmother": ["mggm"]
+    "maternal great grandmother": ["mggm"],
+    "":["my"]
 }
 
 second_dict = {
@@ -247,7 +249,7 @@ second_dict = {
     "Your sister": "sister",
     "Your paternal": "paternal",
     "Your maternal": "maternal",
-    "You": "patient"
+    "You": ["you","patient","me"]
 }
 
 def text_change(text, word_dict):
@@ -270,14 +272,13 @@ def second_change(incomplete_text, second_dict):
         return ""
     text = str(incomplete_text)
     for new, old in second_dict.items():
-        # Do NOT replace 'father' or 'mother' when inside longer words
-        if old in ["father", "mother"]:
-            # only replace them as standalone words
-            pattern = rf'\b{re.escape(old)}\b'
+        if isinstance(old, list):
+            for o in old:
+                pattern = rf'\b{o}\b'
+                text = re.sub(pattern, new, text, flags=re.IGNORECASE)
         else:
-            # normal replacement
-            pattern = rf'\b{re.escape(old)}\b'
-        text = re.sub(pattern, new, text, flags=re.IGNORECASE)
+            pattern = rf'\b{old}\b'
+            text = re.sub(pattern, new, text, flags=re.IGNORECASE)
     return text
 
 def convert_at_symbols(text):
@@ -418,6 +419,8 @@ def build_line(row) -> str:
     diag = str(row.get(expected_diag_col,'')).strip()
     conf = parse_confirmation(row.get('Confirmed/Not confirmed/Abroad',''))
     phrase = make_phrase(conf)
+    if rel.lower() == 'you':
+        return f"{rel} were diagnosed with {diag}- *{conf}*"
     # Format: Relationship, Firstname, phrase diagnosis - status
     if first and first.lower() not in ['nan','none','']:
         return f"{rel}, {first}, {phrase} {diag} - *{conf}*"
@@ -429,6 +432,8 @@ def no_name_build_line(row) -> str:
     diag = str(row.get(expected_diag_col, '')).strip()
     conf = str(row.get('Confirmed/Not confirmed/Abroad', '')).strip()
     phrase = make_phrase(conf)
+    if rel.lower() == 'you':
+        return f"{rel} were diagnosed with {diag}- *{conf}*"
     # Format: - Relationship phrase diagnosis - status (no first name)
     return f"{rel} {phrase} {diag} - *{conf}*"
 
@@ -438,12 +443,20 @@ def no_confs_build_line(row) -> str:
     diag = str(row.get(expected_diag_col, '')).strip()
     phrase = "was diagnosed with"
     # Format: - Relationship, phrase diagnosis (no conf info)
-    return f"{rel}, {first}, {phrase} {diag}"
+    if rel.lower() == 'you':
+        return f"{rel} were diagnosed with {diag}"
+    # Format: Relationship, Firstname, phrase diagnosis - status
+    if first and first.lower() not in ['nan','none','']:
+        return f"{rel}, {first}, {phrase} {diag}"
+    else:
+        return f"{rel}, {phrase} {diag}"
 
 def no_confs_and_no_name_build_line(row) -> str:
     rel = str(row.get('Relationship_clean', '')).strip()
     diag = str(row.get(expected_diag_col, '')).strip()
     phrase = "was diagnosed with"
+    if rel.lower() == 'you':
+        return f"{rel} were diagnosed with {diag}*"
     # Format: - Relationship default phrase diagnosis (no first name or confs)
     return f"{rel} {phrase} {diag}"
 
